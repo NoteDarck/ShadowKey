@@ -1,0 +1,123 @@
+# ============================================
+# ShadowKey - .gitignore
+# ============================================
+
+# ---------- Cofres de teste (CRÍTICO!) ----------
+# Nunca commite arquivos de cofre reais ou de teste
+*.vault
+*.vault-journal
+*.vault-wal
+*.vault-shm
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+shadowkey*.vault
+!example.vault.example
+
+# ---------- Node.js / Frontend ----------
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.npm/
+.yarn/
+
+# Variáveis de ambiente do frontend
+.env
+.env.local
+.env.*.local
+
+# ---------- Rust / Cargo ----------
+target/
+**/target/
+Cargo.lock.bak
+
+# (Cargo.lock do workspace raiz - veja observação abaixo)
+# src-tauri/Cargo.lock  # NÃO ignore isto (veja nota)
+
+# ---------- Tauri ----------
+# Builds gerados
+src-tauri/target/
+src-tauri/gen/schemas/
+src-tauri/gen/android/app/build/
+src-tauri/gen/android/build/
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/local.properties
+src-tauri/gen/android/key.properties
+src-tauri/gen/android/app/release/
+src-tauri/gen/android/app/debug/
+src-tauri/gen/android/app/*.jks
+src-tauri/gen/android/app/*.keystore
+src-tauri/gen/apple/build/
+src-tauri/gen/apple/DerivedData/
+src-tauri/gen/apple/*.xcworkspace/xcuserdata/
+src-tauri/gen/apple/*.xcodeproj/xcuserdata/
+
+# Configurações locais do Tauri
+src-tauri/.tauri/
+.tauri/
+
+# ---------- Android / iOS ----------
+*.apk
+*.aab
+*.ipa
+*.mobileprovision
+*.p12
+*.jks
+*.keystore
+
+# ---------- IDE / Editor ----------
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# ---------- Sistema Operacional ----------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ---------- Logs e temporários ----------
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.bak
+*.orig
+
+# ---------- Cobertura de testes ----------
+coverage/
+*.profraw
+*.profdata
+tarpaulin-report.*
+
+# ---------- Segredos / chaves locais ----------
+# Nunca commite keystores, certificados ou chaves privadas
+*.pem
+*.key
+secrets/
+.env.production
+.env.release
+
+# ---------- GitHub Actions local ----------
+.actrc
