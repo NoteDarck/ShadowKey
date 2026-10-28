@@ -1,48 +1,265 @@
 <!DOCTYPE html>
-<html lang="pt">
+<html lang="pt-BR">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ShadowKey</title>
-    <style>
-        body { font-family: sans-serif; padding: 20px; background: #1a1a1a; color: #eee; }
-        input, button { padding: 8px; margin: 5px 0; width: 100%; box-sizing: border-box; }
-        button { cursor: pointer; background: #3b82f6; color: white; border: none; border-radius: 4px; }
-        .section { border: 1px solid #333; padding: 15px; margin-bottom: 15px; border-radius: 8px; }
-        #log { white-space: pre-wrap; background: #000; padding: 10px; font-size: 12px; }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <title>ShadowKey — Cofre de Senhas</title>
+  <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-    <h1>ShadowKey</h1>
+  <div id="app">
+    <section id="lock-screen" class="screen lock-screen">
+      <div class="lock-glow" aria-hidden="true"></div>
 
-    <div class="section">
-        <h3>1. Selecionar arquivo do cofre</h3>
-        <button id="btn-select">Selecionar arquivo do pendrive (.vault)</button>
-        <p id="file-path" style="font-size:12px; color:#aaa;">Nenhum arquivo selecionado</p>
-    </div>
+      <div class="brand">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 64 64" role="img">
+            <defs>
+              <linearGradient id="logo-gradient" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#38bdf8" />
+                <stop offset="100%" stop-color="#6366f1" />
+              </linearGradient>
+            </defs>
+            <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#logo-gradient)" />
+            <path d="M32 13c-6.6 0-12 5.4-12 12v5h-3.5a2.5 2.5 0 0 0-2.5 2.5v17A2.5 2.5 0 0 0 16.5 52h31a2.5 2.5 0 0 0 2.5-2.5v-17a2.5 2.5 0 0 0-2.5-2.5H44v-5c0-6.6-5.4-12-12-12Zm0 6c3.3 0 6 2.7 6 6v5H26v-5c0-3.3 2.7-6 6-6Zm0 16a4.5 4.5 0 0 1 2.2 8.4v4.1a1.5 1.5 0 0 1-3 0v-4.1A4.5 4.5 0 0 1 32 35Z" fill="#fff" />
+          </svg>
+        </div>
+        <h1>ShadowKey</h1>
+        <p class="tagline">Seu cofre de senhas portátil</p>
+      </div>
 
-    <div class="section">
-        <h3>2. Senha mestra</h3>
-        <input type="password" id="master-pass" placeholder="Digite a senha mestra" />
-        <button id="btn-unlock">Desbloquear e listar</button>
-        <button id="btn-create" style="background:#22c55e;">Criar novo cofre neste arquivo</button>
-    </div>
+      <div class="card lock-card">
+        <div class="card-heading">
+          <h2>Abrir cofre</h2>
+          <span class="badge">Pendrive / cartão</span>
+        </div>
 
-    <div class="section">
-        <h3>3. Adicionar senha</h3>
-        <input type="text" id="service" placeholder="Serviço (ex: Gmail)" />
-        <input type="text" id="username" placeholder="Usuário" />
-        <input type="password" id="password" placeholder="Senha" />
-        <button id="btn-add">Adicionar ao cofre</button>
-    </div>
+        <label>Pasta do cofre</label>
+        <div class="path-row">
+          <div id="vault-path" class="path" title="Nenhuma pasta selecionada">Nenhuma pasta selecionada</div>
+          <button id="btn-choose" class="btn secondary" type="button">Escolher pasta</button>
+        </div>
+        <button id="btn-portable" class="link-button" type="button">
+          Usar a pasta ao lado do aplicativo (modo pendrive)
+        </button>
+        <p id="vault-hint" class="hint">Escolha a pasta do cofre no pendrive ou cartão de memória.</p>
 
-    <div class="section">
-        <h3>Entradas no cofre</h3>
-        <div id="entries">Nenhuma entrada carregada.</div>
-    </div>
+        <label for="master-pass">Senha mestra</label>
+        <div class="password-field">
+          <input
+            type="password"
+            id="master-pass"
+            placeholder="Digite sua senha mestra"
+            autocomplete="off"
+            spellcheck="false"
+            maxlength="1024"
+          />
+          <button id="toggle-master" class="icon-btn" type="button" aria-label="Mostrar senha mestra">Mostrar</button>
+        </div>
 
-    <div id="log"></div>
+        <div id="confirm-wrap" class="hidden">
+          <label for="master-pass-confirm">Confirmar senha mestra</label>
+          <input
+            type="password"
+            id="master-pass-confirm"
+            placeholder="Repita a senha mestra"
+            autocomplete="off"
+            spellcheck="false"
+            maxlength="1024"
+          />
+        </div>
 
-    <script type="module" src="/main.js"></script>
+        <p id="lock-error" class="error hidden" role="alert"></p>
+
+        <div class="actions">
+          <button id="btn-unlock" class="btn primary" type="button">Abrir cofre</button>
+          <button id="btn-create" class="btn success" type="button">Criar novo cofre</button>
+        </div>
+
+        <p class="crypto-note">
+          Criptografia autenticada <strong>XChaCha20-Poly1305</strong> com derivação de chave
+          <strong>Argon2id</strong>. Nada é enviado para a internet.
+        </p>
+      </div>
+
+      <p class="lock-footer">Mantenha uma cópia de segurança do cofre. Sem a senha mestra, os dados não podem ser recuperados.</p>
+    </section>
+
+    <section id="vault-screen" class="screen vault-screen hidden">
+      <header class="topbar">
+        <div class="brand small">
+          <div class="logo mini" aria-hidden="true">
+            <svg viewBox="0 0 64 64">
+              <defs>
+                <linearGradient id="logo-gradient-mini" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#38bdf8" />
+                  <stop offset="100%" stop-color="#6366f1" />
+                </linearGradient>
+              </defs>
+              <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#logo-gradient-mini)" />
+              <path d="M32 13c-6.6 0-12 5.4-12 12v5h-3.5a2.5 2.5 0 0 0-2.5 2.5v17A2.5 2.5 0 0 0 16.5 52h31a2.5 2.5 0 0 0 2.5-2.5v-17a2.5 2.5 0 0 0-2.5-2.5H44v-5c0-6.6-5.4-12-12-12Zm0 6c3.3 0 6 2.7 6 6v5H26v-5c0-3.3 2.7-6 6-6Zm0 16a4.5 4.5 0 0 1 2.2 8.4v4.1a1.5 1.5 0 0 1-3 0v-4.1A4.5 4.5 0 0 1 32 35Z" fill="#fff" />
+            </svg>
+          </div>
+          <div class="brand-text">
+            <strong>ShadowKey</strong>
+            <span id="vault-folder" class="folder-label"></span>
+          </div>
+        </div>
+        <div class="top-actions">
+          <button id="btn-change-pass" class="btn ghost" type="button">Alterar senha mestra</button>
+          <button id="btn-lock" class="btn secondary" type="button">Bloquear</button>
+        </div>
+      </header>
+
+      <main class="vault-layout">
+        <aside class="sidebar">
+          <div class="sidebar-top">
+            <input id="search" type="search" placeholder="Buscar por serviço ou usuário" autocomplete="off" />
+            <button id="btn-new-entry" class="btn primary full" type="button">Nova senha</button>
+          </div>
+          <div id="entry-list" class="entry-list" role="list"></div>
+          <div id="empty-state" class="empty hidden">
+            <strong>Nenhuma senha encontrada</strong>
+            <span>Clique em “Nova senha” para guardar sua primeira credencial.</span>
+          </div>
+        </aside>
+
+        <section class="detail">
+          <div id="detail-empty" class="detail-empty">
+            <div class="detail-empty-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="4" y="10" width="16" height="10" rx="2" />
+                <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+                <circle cx="12" cy="15" r="1" />
+              </svg>
+            </div>
+            <strong>Selecione uma senha</strong>
+            <span>Escolha uma entrada à esquerda para ver e copiar os dados.</span>
+          </div>
+
+          <article id="detail-card" class="detail-card hidden">
+            <div class="detail-head">
+              <div id="detail-avatar" class="avatar large">?</div>
+              <div class="detail-title">
+                <h2 id="detail-name"></h2>
+                <p id="detail-username" class="muted"></p>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label>Usuário</label>
+              <div class="copy-row">
+                <input id="detail-user" type="text" readonly />
+                <button id="btn-copy-user" class="btn ghost" type="button">Copiar</button>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label>Senha</label>
+              <div class="copy-row">
+                <input id="detail-pass" type="password" readonly />
+                <button id="btn-reveal" class="btn ghost" type="button">Mostrar</button>
+                <button id="btn-copy-pass" class="btn ghost" type="button">Copiar</button>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label>Notas</label>
+              <textarea id="detail-notes" rows="4" readonly></textarea>
+            </div>
+
+            <div class="detail-actions">
+              <button id="btn-edit" class="btn secondary" type="button">Editar</button>
+              <button id="btn-delete" class="btn danger" type="button">Excluir</button>
+            </div>
+            <p id="detail-meta" class="meta"></p>
+          </article>
+        </section>
+      </main>
+
+      <footer class="statusbar">
+        <span id="entry-count">0 entradas</span>
+        <span id="auto-lock-info">Bloqueio automático após 5 min de inatividade</span>
+      </footer>
+    </section>
+  </div>
+
+  <dialog id="entry-modal" class="modal">
+    <form id="entry-form" method="dialog" novalidate>
+      <div class="modal-head">
+        <h2 id="modal-title">Nova senha</h2>
+        <button id="btn-close-entry" class="icon-btn" type="button" aria-label="Fechar">Fechar</button>
+      </div>
+
+      <input type="hidden" id="entry-id" />
+
+      <label for="entry-service">Serviço / site</label>
+      <input id="entry-service" type="text" maxlength="120" placeholder="Ex.: Gmail, Netflix, banco..." autocomplete="off" />
+
+      <label for="entry-username">Usuário / e-mail</label>
+      <input id="entry-username" type="text" maxlength="200" placeholder="seu@email.com" autocomplete="off" spellcheck="false" />
+
+      <label for="entry-password">Senha</label>
+      <div class="password-field">
+        <input id="entry-password" type="password" maxlength="500" placeholder="Digite ou gere uma senha" autocomplete="off" spellcheck="false" />
+        <button id="btn-toggle-entry-pass" class="icon-btn" type="button" aria-label="Mostrar senha">Mostrar</button>
+      </div>
+
+      <div class="generator">
+        <div class="generator-row">
+          <label for="gen-length">Tamanho: <strong id="gen-length-value">20</strong></label>
+          <input id="gen-length" type="range" min="8" max="64" value="20" />
+        </div>
+        <div class="checks">
+          <label><input type="checkbox" id="gen-lower" checked /> a-z</label>
+          <label><input type="checkbox" id="gen-upper" checked /> A-Z</label>
+          <label><input type="checkbox" id="gen-digits" checked /> 0-9</label>
+          <label><input type="checkbox" id="gen-special" checked /> !@#</label>
+          <label><input type="checkbox" id="gen-ambiguous" /> evitar parecidos</label>
+        </div>
+        <button id="btn-generate" class="btn ghost full" type="button">Gerar senha forte</button>
+      </div>
+
+      <label for="entry-notes">Notas (opcional)</label>
+      <textarea id="entry-notes" rows="3" maxlength="2000" placeholder="Perguntas de segurança, observações..."></textarea>
+
+      <p id="entry-error" class="error hidden" role="alert"></p>
+
+      <div class="modal-actions">
+        <button id="btn-cancel-entry" class="btn ghost" type="button">Cancelar</button>
+        <button id="btn-save-entry" class="btn primary" type="submit">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="master-modal" class="modal">
+    <form id="master-form" method="dialog" novalidate>
+      <div class="modal-head">
+        <h2>Alterar senha mestra</h2>
+        <button id="btn-close-master" class="icon-btn" type="button" aria-label="Fechar">Fechar</button>
+      </div>
+
+      <label for="current-master">Senha atual</label>
+      <input id="current-master" type="password" autocomplete="off" spellcheck="false" maxlength="1024" />
+
+      <label for="new-master">Nova senha (mínimo 8 caracteres)</label>
+      <input id="new-master" type="password" autocomplete="off" spellcheck="false" maxlength="1024" />
+
+      <label for="confirm-new-master">Confirmar nova senha</label>
+      <input id="confirm-new-master" type="password" autocomplete="off" spellcheck="false" maxlength="1024" />
+
+      <p id="master-error" class="error hidden" role="alert"></p>
+
+      <div class="modal-actions">
+        <button id="btn-cancel-master" class="btn ghost" type="button">Cancelar</button>
+        <button class="btn primary" type="submit">Alterar senha</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/main.js"></script>
 </body>
 </html>

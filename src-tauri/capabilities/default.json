@@ -1,10 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Permissões da janela principal do ShadowKey",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "dialog:default"
+    "dialog:default",
+    "clipboard-manager:allow-write-text",
+    "clipboard-manager:allow-read-text"
   ]
 }

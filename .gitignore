@@ -8,6 +8,12 @@
 *.vault-journal
 *.vault-wal
 *.vault-shm
+# Formato de cofre do iwcore (contém dados criptografados)
+nswallet.dat
+nswallet.dat-journal
+nswallet.dat-wal
+nswallet.dat-shm
+ShadowKeyVault/
 *.db
 *.db-journal
 *.sqlite

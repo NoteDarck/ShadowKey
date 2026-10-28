@@ -1,43 +1,67 @@
-name: 'publish'
+name: Release
+
 on:
   push:
     branches:
-      - release # 当你推送到 release 分支时触发
-  workflow_dispatch: # 也允许手动触发
+      - release
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  publish-tauri:
+  desktop:
+    name: Desktop (${{ matrix.name }})
     permissions:
-      contents: write # 需要写权限才能创建 Release
+      contents: write
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest' # macOS (Apple Silicon)
-            args: '--target aarch64-apple-darwin'
-          - platform: 'macos-latest' # macOS (Intel)
-            args: '--target x86_64-apple-darwin'
-          - platform: 'ubuntu-22.04' # Linux
+          - name: Linux x86_64
+            platform: ubuntu-22.04
             args: ''
-          - platform: 'windows-latest' # Windows
+          - name: macOS Apple Silicon
+            platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+          - name: macOS Intel
+            platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+          - name: Windows x86_64
+            platform: windows-latest
             args: ''
 
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: install dependencies (ubuntu only)
+      - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            wget
 
-      - name: setup node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
+          cache: npm
 
-      - name: install Rust stable
+      - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
@@ -47,16 +71,174 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
-      - name: install frontend dependencies
-        run: npm install # 或 pnpm install / yarn install
+      - name: Install frontend dependencies
+        run: npm ci
 
-      - uses: tauri-apps/tauri-action@v0
+      - name: Build and upload desktop bundles
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: app-v__VERSION__ # 自动使用 tauri.conf.json 中的版本号
+          tagName: app-v__VERSION__
           releaseName: 'ShadowKey v__VERSION__'
-          releaseBody: 'See the assets to download this version and install.'
+          releaseBody: |
+            ## ShadowKey v__VERSION__
+
+            Cofre de senhas portátil com criptografia autenticada.
+
+            ### Downloads
+            - Windows: `.msi` / `.exe`
+            - macOS: `.dmg`
+            - Linux: `.AppImage` / `.deb` / `.rpm`
+            - Android: `.apk`
+
+            Mantenha uma cópia de segurança do cofre. Sem a senha mestra, os dados não podem ser recuperados.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  android:
+    name: Android APK
+    needs: desktop
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Setup Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r29
+          link-to-sdk: true
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Initialize Android project
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: npm run tauri -- android init --ci
+
+      - name: Configure Android signing
+        env:
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          gradle = Path("src-tauri/gen/android/app/build.gradle.kts")
+          text = gradle.read_text()
+          release_marker = '        getByName("release") {\n'
+
+          if os.environ.get("ANDROID_KEY_BASE64"):
+              keystore = Path(os.environ["RUNNER_TEMP"]) / "shadowkey-release.jks"
+              keystore.write_bytes(base64.b64decode(os.environ["ANDROID_KEY_BASE64"]))
+              Path("src-tauri/gen/android/keystore.properties").write_text(
+                  f"keyAlias={os.environ['ANDROID_KEY_ALIAS']}\n"
+                  f"password={os.environ['ANDROID_KEY_PASSWORD']}\n"
+                  f"storeFile={keystore}\n"
+              )
+              text = text.replace(
+                  "import java.util.Properties",
+                  "import java.io.FileInputStream\nimport java.util.Properties",
+                  1,
+              )
+              signing_config = '''
+          signingConfigs {
+              create("release") {
+                  val keystorePropertiesFile = rootProject.file("keystore.properties")
+                  val keystoreProperties = Properties()
+                  if (keystorePropertiesFile.exists()) {
+                      keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+                  }
+                  keyAlias = keystoreProperties["keyAlias"] as String
+                  keyPassword = keystoreProperties["password"] as String
+                  storeFile = file(keystoreProperties["storeFile"] as String)
+                  storePassword = keystoreProperties["password"] as String
+              }
+          }
+          '''
+              text = text.replace("    buildTypes {", signing_config + "    buildTypes {", 1)
+              text = text.replace(
+                  release_marker,
+                  release_marker
+                  + '            signingConfig = signingConfigs.getByName("release")\n',
+                  1,
+              )
+          else:
+              text = text.replace(
+                  release_marker,
+                  release_marker
+                  + '            signingConfig = signingConfigs.getByName("debug")\n',
+                  1,
+              )
+
+          gradle.write_text(text)
+          PY
+
+      - name: Build Android APK
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: npm run tauri -- android build --apk
+
+      - name: Upload APK to draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          mapfile -t apks < <(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -type f)
+          if [ "${#apks[@]}" -eq 0 ]; then
+            echo "Nenhum APK encontrado."
+            exit 1
+          fi
+          printf 'Enviando %s\n' "${apks[@]}"
+          gh release upload "app-v${version}" "${apks[@]}" --clobber
+
+  publish:
+    name: Publish release
+    needs:
+      - desktop
+      - android
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          gh release edit "app-v${version}" --draft=false --latest
