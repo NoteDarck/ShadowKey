@@ -5,6 +5,11 @@ on:
     branches:
       - release
   workflow_dispatch:
+    inputs:
+      allow_debug_signing:
+        description: 'Assinar o APK com a chave de debug (apenas para testes)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -148,6 +153,7 @@ jobs:
 
       - name: Configure Android signing
         env:
+          ALLOW_DEBUG_SIGNING: ${{ inputs.allow_debug_signing || 'false' }}
           ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
@@ -196,12 +202,18 @@ jobs:
                   + '            signingConfig = signingConfigs.getByName("release")\n',
                   1,
               )
-          else:
+          elif os.environ.get("ALLOW_DEBUG_SIGNING") == "true":
               text = text.replace(
                   release_marker,
                   release_marker
                   + '            signingConfig = signingConfigs.getByName("debug")\n',
                   1,
+              )
+          else:
+              raise SystemExit(
+                  "Configure os secrets ANDROID_KEY_BASE64, ANDROID_KEY_ALIAS e "
+                  "ANDROID_KEY_PASSWORD ou execute com allow_debug_signing=true "
+                  "para gerar um APK de teste."
               )
 
           gradle.write_text(text)
