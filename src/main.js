@@ -6,6 +6,9 @@ import jsQR from "jsqr";
 const LAST_FOLDER_KEY = "shadowkey.lastFolder";
 const AUTO_LOCK_MS = 5 * 60 * 1000;
 const CLIPBOARD_CLEAR_MS = 30 * 1000;
+const IMPORT_CSV_ACCEPT = ".csv,.txt,text/csv,text/plain";
+const IMPORT_IMAGE_ACCEPT = ".png,.jpg,.jpeg,.webp,.gif,.bmp,image/*";
+const IMPORT_ALL_ACCEPT = `${IMPORT_CSV_ACCEPT},${IMPORT_IMAGE_ACCEPT}`;
 
 const state = {
   folder: null,
@@ -29,6 +32,10 @@ const storageOptionsEl = document.getElementById("storage-options");
 const storageOptionListEl = document.getElementById("storage-option-list");
 const importFileEl = document.getElementById("import-file");
 const importBtn = document.getElementById("btn-import");
+const importModal = document.getElementById("import-modal");
+const importTextEl = document.getElementById("import-text");
+const importDropEl = document.getElementById("import-drop");
+const importResultEl = document.getElementById("import-result");
 const masterPassEl = document.getElementById("master-pass");
 const masterConfirmEl = document.getElementById("master-pass-confirm");
 const confirmWrapEl = document.getElementById("confirm-wrap");
@@ -709,10 +716,56 @@ async function refreshEntries() {
   }
 }
 
-function triggerImport() {
+function openImportModal() {
+  if (!state.unlocked) return;
+  hideImportResult();
+  importTextEl.value = "";
+  importModal.showModal();
+  importTextEl.focus();
+}
+
+function triggerImport(accept = IMPORT_ALL_ACCEPT) {
   if (!state.unlocked) return;
   importFileEl.value = "";
+  importFileEl.accept = accept;
   importFileEl.click();
+}
+
+function hideImportResult() {
+  importResultEl.className = "import-result hidden";
+  importResultEl.replaceChildren();
+}
+
+function setImportBusy(busy) {
+  importModal.querySelectorAll("button").forEach((button) => {
+    button.disabled = busy;
+  });
+  importModal.classList.toggle("busy", busy);
+}
+
+function appendImportDetails(title, items, kind) {
+  if (!items?.length) return;
+  const group = document.createElement("div");
+  group.className = `import-result-group ${kind}`;
+  const heading = document.createElement("strong");
+  heading.textContent = title;
+  group.append(heading);
+
+  const list = document.createElement("ul");
+  const visible = items.slice(0, 8);
+  for (const item of visible) {
+    const entry = document.createElement("li");
+    entry.textContent = item;
+    list.append(entry);
+  }
+  if (items.length > visible.length) {
+    const more = document.createElement("li");
+    more.textContent = `... e mais ${items.length - visible.length}.`;
+    list.append(more);
+  }
+
+  group.append(list);
+  importResultEl.append(group);
 }
 
 function isImageFile(file) {
@@ -778,28 +831,43 @@ async function decodeQrFromFile(file) {
 }
 
 function showImportResult(result) {
-  const { imported, skipped, errors, warnings } = result;
+  const imported = Number(result.imported) || 0;
+  const skipped = Number(result.skipped) || 0;
+  const errors = result.errors || [];
+  const warnings = result.warnings || [];
 
-  if (imported === 0) {
-    const detail = errors[0] || warnings[0] || "Nenhum dado de senha ou 2FA encontrado.";
-    showToast(`Nenhuma entrada importada. ${detail}`, "error");
-    return;
-  }
-
-  let message = `${imported} ${imported === 1 ? "entrada importada" : "entradas importadas"}`;
+  let message =
+    imported > 0
+      ? `${imported} ${imported === 1 ? "entrada importada" : "entradas importadas"}`
+      : "Nenhuma entrada importada";
   if (skipped > 0) message += `; ${skipped} ignorada(s)`;
   if (warnings.length > 0) message += `; ${warnings.length} aviso(s)`;
   if (errors.length > 0) message += `; ${errors.length} erro(s)`;
-  showToast(`${message}.`, skipped > 0 || warnings.length > 0 || errors.length > 0 ? "info" : "success");
+
+  hideImportResult();
+  const summary = document.createElement("strong");
+  summary.textContent = `${message}.`;
+  importResultEl.append(summary);
+  appendImportDetails("Avisos", warnings, "warning");
+  appendImportDetails("Erros", errors, "error");
+  importResultEl.className = `import-result ${imported > 0 ? "success" : "error"}`;
+
+  showToast(
+    `${message}.`,
+    imported > 0
+      ? skipped > 0 || warnings.length > 0 || errors.length > 0
+        ? "info"
+        : "success"
+      : "error",
+  );
 }
 
-async function importFiles() {
-  const files = Array.from(importFileEl.files || []);
-  if (files.length === 0) return;
+async function importFiles(files) {
+  const selected = Array.from(files || []);
+  if (selected.length === 0) return;
 
-  const originalLabel = importBtn.textContent;
-  importBtn.disabled = true;
-  importBtn.textContent = "Importando...";
+  setImportBusy(true);
+  hideImportResult();
 
   try {
     let imported = 0;
@@ -807,7 +875,7 @@ async function importFiles() {
     const errors = [];
     const warnings = [];
 
-    for (const file of files) {
+    for (const file of selected) {
       if (file.size > 10 * 1024 * 1024) {
         warnings.push(`${file.name}: arquivo grande demais (limite de 10 MB).`);
         continue;
@@ -833,10 +901,53 @@ async function importFiles() {
   } catch (error) {
     showToast(errorMessage(error), "error");
   } finally {
-    importBtn.disabled = false;
-    importBtn.textContent = originalLabel;
+    setImportBusy(false);
     importFileEl.value = "";
+    importFileEl.accept = IMPORT_ALL_ACCEPT;
   }
+}
+
+async function importDataText(value) {
+  const data = (value || "").trim();
+  if (!data) {
+    showToast("Cole um link otpauth:// ou o conteúdo exportado do Authenticator.", "error");
+    return;
+  }
+
+  setImportBusy(true);
+  hideImportResult();
+  try {
+    const result = await invoke("import_vault_data", { data });
+    await refreshEntries();
+    showImportResult(result);
+    if (result.imported > 0) importTextEl.value = "";
+  } catch (error) {
+    showToast(errorMessage(error), "error");
+  } finally {
+    setImportBusy(false);
+  }
+}
+
+async function importFromClipboard() {
+  try {
+    const text = await readText();
+    if (!text?.trim()) {
+      throw new Error("A área de transferência está vazia.");
+    }
+    importTextEl.value = text;
+    await importDataText(text);
+  } catch (error) {
+    showToast(errorMessage(error), "error");
+  }
+}
+
+async function importPastedImage(event) {
+  const items = Array.from(event.clipboardData?.items || []);
+  const imageItem = items.find((item) => item.type.startsWith("image/"));
+  if (!imageItem) return;
+  event.preventDefault();
+  const file = imageItem.getAsFile();
+  if (file) await importFiles([file]);
 }
 
 function resetEntryForm() {
@@ -1061,8 +1172,40 @@ function bindEvents() {
   });
 
   document.getElementById("btn-new-entry").addEventListener("click", () => openEntryModal());
-  importBtn.addEventListener("click", triggerImport);
-  importFileEl.addEventListener("change", importFiles);
+  importBtn.addEventListener("click", openImportModal);
+  document.getElementById("btn-close-import").addEventListener("click", () => importModal.close());
+  document.getElementById("btn-import-csv").addEventListener("click", () =>
+    triggerImport(IMPORT_CSV_ACCEPT),
+  );
+  document.getElementById("btn-import-qr").addEventListener("click", () =>
+    triggerImport(IMPORT_IMAGE_ACCEPT),
+  );
+  document.getElementById("btn-import-text").addEventListener("click", () =>
+    importDataText(importTextEl.value),
+  );
+  document.getElementById("btn-import-clipboard").addEventListener("click", importFromClipboard);
+  importFileEl.addEventListener("change", () => importFiles(importFileEl.files));
+  importDropEl.addEventListener("click", () => triggerImport(IMPORT_ALL_ACCEPT));
+  importDropEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      triggerImport(IMPORT_ALL_ACCEPT);
+    }
+  });
+  for (const eventName of ["dragenter", "dragover"]) {
+    importDropEl.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      importDropEl.classList.add("dragging");
+    });
+  }
+  for (const eventName of ["dragleave", "drop"]) {
+    importDropEl.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      importDropEl.classList.remove("dragging");
+    });
+  }
+  importDropEl.addEventListener("drop", (event) => importFiles(event.dataTransfer?.files));
+  importModal.addEventListener("paste", importPastedImage);
   document.getElementById("btn-edit").addEventListener("click", () => {
     const entry = state.entries.find((item) => item.id === state.selectedId);
     if (entry) openEntryModal(entry);
@@ -1101,7 +1244,13 @@ function bindEvents() {
     hideMasterError();
   });
 
-  for (const modal of [entryModal, masterModal]) {
+  importModal.addEventListener("close", () => {
+    importTextEl.value = "";
+    importFileEl.accept = IMPORT_ALL_ACCEPT;
+    hideImportResult();
+  });
+
+  for (const modal of [entryModal, masterModal, importModal]) {
     modal.addEventListener("click", (event) => {
       if (event.target === modal) modal.close();
     });

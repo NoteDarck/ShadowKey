@@ -1812,6 +1812,20 @@ mod tests {
     }
 
     #[test]
+    fn parses_multiple_otpauth_lines_from_text() {
+        let data = "otpauth://totp/GitHub:dev%40example.com?secret=JBSWY3DPEHPK3PXP&issuer=GitHub\n\
+                    otpauth://totp/Example:user%40example.com?secret=JBSWY3DPEHPK3PXP&issuer=Example\n";
+
+        let parsed = parse_vault_data(data).unwrap();
+        assert_eq!(parsed.entries.len(), 2);
+        assert!(parsed.errors.is_empty());
+        assert_eq!(parsed.entries[0].name, "GitHub");
+        assert_eq!(parsed.entries[0].username, "dev@example.com");
+        assert_eq!(parsed.entries[1].name, "Example");
+        assert_eq!(parsed.entries[1].username, "user@example.com");
+    }
+
+    #[test]
     fn derives_service_from_url() {
         assert_eq!(
             service_from_url("https://www.example.com/path"),

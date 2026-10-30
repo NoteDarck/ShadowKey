@@ -296,10 +296,69 @@
     </form>
   </dialog>
 
+  <dialog id="import-modal" class="modal import-modal">
+    <div class="modal-body">
+      <div class="modal-head">
+        <h2>Importar senhas e 2FA</h2>
+        <button id="btn-close-import" class="icon-btn" type="button" aria-label="Fechar">Fechar</button>
+      </div>
+      <p class="modal-intro">
+        Traga suas senhas do Google Senhas, Chrome, Bitwarden ou 1Password e suas contas 2FA do
+        Google Authenticator.
+      </p>
+
+      <section class="import-section">
+        <div>
+          <h3>Senhas do Google</h3>
+          <p>
+            Em <strong>passwords.google.com</strong>, abra Configurações → Exportar senhas e
+            selecione o CSV baixado.
+          </p>
+        </div>
+        <button id="btn-import-csv" class="btn secondary" type="button">Escolher CSV</button>
+      </section>
+
+      <section class="import-section">
+        <div>
+          <h3>Google Authenticator</h3>
+          <p>
+            No app, use <strong>Transferir contas → Exportar contas</strong>, escolha as contas e
+            importe o print do QR code. Pode selecionar vários prints ou colar com Ctrl+V.
+          </p>
+        </div>
+        <button id="btn-import-qr" class="btn secondary" type="button">Escolher QR</button>
+      </section>
+
+      <div id="import-drop" class="import-drop" role="button" tabindex="0">
+        <strong>Arraste arquivos aqui</strong>
+        <span>CSV, TXT ou imagens de QR code — até 10 MB por arquivo.</span>
+      </div>
+
+      <label for="import-text">Ou cole um link <code>otpauth://</code> / exportação do Authenticator</label>
+      <textarea
+        id="import-text"
+        rows="4"
+        placeholder="otpauth-migration://offline?data=...&#10;otpauth://totp/..."
+      ></textarea>
+      <div class="import-text-actions">
+        <button id="btn-import-clipboard" class="btn ghost" type="button">
+          Colar da área de transferência
+        </button>
+        <button id="btn-import-text" class="btn primary" type="button">Importar texto</button>
+      </div>
+
+      <div id="import-result" class="import-result hidden" role="status" aria-live="polite"></div>
+      <p class="import-note">
+        Dica: apague o CSV e os prints depois da importação. Eles contêm suas senhas e segredos em
+        texto puro.
+      </p>
+    </div>
+  </dialog>
+
   <input
     id="import-file"
     type="file"
-    accept=".csv,.txt,.png,.jpg,.jpeg,.webp,.gif,text/csv,text/plain,image/*"
+    accept=".csv,.txt,.png,.jpg,.jpeg,.webp,.gif,bmp,text/csv,text/plain,image/*"
     class="hidden"
     multiple
   />
