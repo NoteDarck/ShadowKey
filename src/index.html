@@ -43,6 +43,15 @@
         <button id="btn-portable" class="link-button" type="button">
           Usar a pasta ao lado do aplicativo (modo pendrive)
         </button>
+
+        <div id="storage-options" class="storage-options hidden">
+          <div class="storage-options-head">
+            <span>Armazenamentos detectados</span>
+            <button id="btn-refresh-storage" class="link-button" type="button">Atualizar</button>
+          </div>
+          <div id="storage-option-list" class="storage-option-list"></div>
+        </div>
+
         <p id="vault-hint" class="hint">Escolha a pasta do cofre no pendrive ou cartão de memória.</p>
 
         <label for="master-pass">Senha mestra</label>
@@ -116,7 +125,17 @@
         <aside class="sidebar">
           <div class="sidebar-top">
             <input id="search" type="search" placeholder="Buscar por serviço ou usuário" autocomplete="off" />
-            <button id="btn-new-entry" class="btn primary full" type="button">Nova senha</button>
+            <div class="sidebar-actions">
+              <button id="btn-new-entry" class="btn primary full" type="button">Nova senha</button>
+              <button
+                id="btn-import"
+                class="btn ghost full"
+                type="button"
+                title="Importe CSV do Google Senhas/Bitwarden ou QR do Google Authenticator"
+              >
+                Importar senhas / 2FA
+              </button>
+            </div>
           </div>
           <div id="entry-list" class="entry-list" role="list"></div>
           <div id="empty-state" class="empty hidden">
@@ -164,6 +183,20 @@
               </div>
             </div>
 
+            <div id="detail-totp-group" class="field-group hidden">
+              <label for="detail-totp">
+                Código 2FA
+                <span id="totp-countdown" class="totp-countdown"></span>
+              </label>
+              <div class="copy-row">
+                <input id="detail-totp" class="totp-code" type="text" inputmode="numeric" readonly />
+                <button id="btn-copy-totp" class="btn ghost" type="button">Copiar</button>
+              </div>
+              <div class="totp-progress" aria-hidden="true">
+                <span id="totp-progress-bar"></span>
+              </div>
+            </div>
+
             <div class="field-group">
               <label>Notas</label>
               <textarea id="detail-notes" rows="4" readonly></textarea>
@@ -205,6 +238,11 @@
         <input id="entry-password" type="password" maxlength="500" placeholder="Digite ou gere uma senha" autocomplete="off" spellcheck="false" />
         <button id="btn-toggle-entry-pass" class="icon-btn" type="button" aria-label="Mostrar senha">Mostrar</button>
       </div>
+      <p class="field-hint">Opcional quando a entrada tiver apenas código 2FA.</p>
+
+      <label for="entry-totp">Código 2FA / TOTP (opcional)</label>
+      <input id="entry-totp" type="text" maxlength="4096" placeholder="Segredo Base32 ou link otpauth://" autocomplete="off" spellcheck="false" />
+      <p class="field-hint">Aceita segredo Base32 ou link otpauth:// do autenticador.</p>
 
       <div class="generator">
         <div class="generator-row">
@@ -257,6 +295,14 @@
       </div>
     </form>
   </dialog>
+
+  <input
+    id="import-file"
+    type="file"
+    accept=".csv,.txt,.png,.jpg,.jpeg,.webp,.gif,text/csv,text/plain,image/*"
+    class="hidden"
+    multiple
+  />
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 

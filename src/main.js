@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { confirm as confirmDialog, open } from "@tauri-apps/plugin-dialog";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
+import jsQR from "jsqr";
 
 const LAST_FOLDER_KEY = "shadowkey.lastFolder";
 const AUTO_LOCK_MS = 5 * 60 * 1000;
@@ -17,12 +18,17 @@ const state = {
   busy: false,
   busyAction: null,
   mobile: false,
+  storageOptions: [],
 };
 
 const lockScreen = document.getElementById("lock-screen");
 const vaultScreen = document.getElementById("vault-screen");
 const vaultPathEl = document.getElementById("vault-path");
 const vaultHintEl = document.getElementById("vault-hint");
+const storageOptionsEl = document.getElementById("storage-options");
+const storageOptionListEl = document.getElementById("storage-option-list");
+const importFileEl = document.getElementById("import-file");
+const importBtn = document.getElementById("btn-import");
 const masterPassEl = document.getElementById("master-pass");
 const masterConfirmEl = document.getElementById("master-pass-confirm");
 const confirmWrapEl = document.getElementById("confirm-wrap");
@@ -41,10 +47,15 @@ const detailNameEl = document.getElementById("detail-name");
 const detailUsernameEl = document.getElementById("detail-username");
 const detailUserEl = document.getElementById("detail-user");
 const detailPassEl = document.getElementById("detail-pass");
+const detailTotpGroupEl = document.getElementById("detail-totp-group");
+const detailTotpEl = document.getElementById("detail-totp");
+const totpCountdownEl = document.getElementById("totp-countdown");
+const totpProgressBarEl = document.getElementById("totp-progress-bar");
 const detailNotesEl = document.getElementById("detail-notes");
 const detailMetaEl = document.getElementById("detail-meta");
 const revealBtn = document.getElementById("btn-reveal");
 const copyPassBtn = document.getElementById("btn-copy-pass");
+const copyTotpBtn = document.getElementById("btn-copy-totp");
 const copyUserBtn = document.getElementById("btn-copy-user");
 const entryModal = document.getElementById("entry-modal");
 const entryForm = document.getElementById("entry-form");
@@ -52,6 +63,7 @@ const entryIdEl = document.getElementById("entry-id");
 const entryServiceEl = document.getElementById("entry-service");
 const entryUsernameEl = document.getElementById("entry-username");
 const entryPasswordEl = document.getElementById("entry-password");
+const entryTotpEl = document.getElementById("entry-totp");
 const entryNotesEl = document.getElementById("entry-notes");
 const entryErrorEl = document.getElementById("entry-error");
 const entryModalTitle = document.getElementById("modal-title");
@@ -69,6 +81,8 @@ const genLengthValueEl = document.getElementById("gen-length-value");
 let autoLockTimer = null;
 let toastTimer = null;
 let clipboardTimer = null;
+let totpTimer = null;
+let totpRefreshing = false;
 let lastActivityAt = 0;
 
 function errorMessage(error) {
@@ -163,7 +177,61 @@ function applyMobileUi() {
   portableBtn.classList.remove("hidden");
   document.querySelector(".badge").textContent = "Android";
   vaultHintEl.textContent =
-    "O cofre será salvo no armazenamento privado do aplicativo.";
+    "Escolha o armazenamento privado do aplicativo ou o cartão SD.";
+}
+
+function storageIcon(kind) {
+  if (kind === "removable") return "SD";
+  if (kind === "external") return "EXT";
+  if (kind === "portable") return "APP";
+  return "APP";
+}
+
+function renderStorageOptions() {
+  storageOptionListEl.replaceChildren();
+
+  for (const option of state.storageOptions) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `storage-option${option.path === state.folder ? " active" : ""}`;
+    button.title = option.path;
+
+    const icon = document.createElement("span");
+    icon.className = "storage-option-icon";
+    icon.textContent = storageIcon(option.kind);
+
+    const text = document.createElement("span");
+    text.className = "storage-option-text";
+
+    const label = document.createElement("span");
+    label.className = "storage-option-label";
+    label.textContent = option.label;
+
+    const path = document.createElement("span");
+    path.className = "storage-option-path";
+    path.textContent = option.path;
+
+    text.append(label, path);
+    button.append(icon, text);
+    button.addEventListener("click", async () => {
+      hideLockError();
+      await setFolder(option.path);
+      showToast(`${option.label} selecionado.`, "info");
+    });
+    storageOptionListEl.append(button);
+  }
+
+  storageOptionsEl.classList.toggle("hidden", state.storageOptions.length === 0);
+}
+
+async function loadStorageOptions() {
+  try {
+    state.storageOptions = await invoke("list_storage_options");
+  } catch (error) {
+    state.storageOptions = [];
+    showLockError(errorMessage(error));
+  }
+  renderStorageOptions();
 }
 
 function setFolder(path) {
@@ -173,6 +241,7 @@ function setFolder(path) {
   vaultPathEl.title = path;
   vaultPathEl.classList.add("selected");
   localStorage.setItem(LAST_FOLDER_KEY, path);
+  renderStorageOptions();
   return inspectCurrentFolder();
 }
 
@@ -206,6 +275,7 @@ async function inspectCurrentFolder() {
     vaultHintEl.className = "hint warn";
   }
 
+  renderStorageOptions();
   refreshLockButtons();
 }
 
@@ -356,6 +426,11 @@ async function lockVault(automatic = false) {
   detailNotesEl.value = "";
   detailNameEl.textContent = "";
   detailUsernameEl.textContent = "";
+  detailTotpGroupEl.classList.add("hidden");
+  detailTotpEl.value = "";
+  totpCountdownEl.textContent = "";
+  totpProgressBarEl.style.width = "100%";
+  stopTotpTimer();
   if (entryModal.open) entryModal.close();
   if (masterModal.open) masterModal.close();
   clearSensitiveInputs();
@@ -425,6 +500,12 @@ function renderEntries() {
     const username = document.createElement("span");
     username.className = "entry-user";
     username.textContent = entry.username || "sem usuário";
+    if (entry.hasTotp) {
+      const badge = document.createElement("span");
+      badge.className = "entry-badge";
+      badge.textContent = "2FA";
+      username.append(badge);
+    }
 
     info.append(name, username);
     button.append(avatar, info);
@@ -449,12 +530,18 @@ function renderEntries() {
 }
 
 function showDetailEmpty() {
+  stopTotpTimer();
   detailCardEl.classList.add("hidden");
   detailEmptyEl.classList.remove("hidden");
+  detailTotpGroupEl.classList.add("hidden");
+  detailTotpEl.value = "";
+  totpCountdownEl.textContent = "";
 }
 
 async function selectEntry(id) {
+  stopTotpTimer();
   state.selectedId = id;
+  state.selected = null;
   renderEntries();
 
   try {
@@ -474,6 +561,12 @@ async function selectEntry(id) {
     copyUserBtn.disabled = !details.username;
     detailNotesEl.value = details.notes || "";
     detailNotesEl.placeholder = details.notes ? "" : "Sem notas";
+    detailTotpGroupEl.classList.toggle("hidden", !details.hasTotp);
+    detailTotpEl.value = "";
+    totpCountdownEl.textContent = "";
+    totpProgressBarEl.style.width = "100%";
+    totpProgressBarEl.classList.remove("expiring");
+    startTotpTimer();
 
     const summary = state.entries.find((entry) => entry.id === id);
     const updated = formatDate(summary?.updatedAt);
@@ -489,6 +582,59 @@ async function selectEntry(id) {
 async function getSecret(field) {
   if (!state.selectedId) return "";
   return invoke("get_secret", { id: state.selectedId, field });
+}
+
+function stopTotpTimer() {
+  if (totpTimer) {
+    clearInterval(totpTimer);
+    totpTimer = null;
+  }
+  totpRefreshing = false;
+}
+
+function formatTotpCode(code) {
+  if (code.length === 6) return `${code.slice(0, 3)} ${code.slice(3)}`;
+  if (code.length === 8) return `${code.slice(0, 4)} ${code.slice(4)}`;
+  return code;
+}
+
+async function refreshTotp() {
+  const id = state.selectedId;
+  if (!state.unlocked || !id || !state.selected?.hasTotp || totpRefreshing) return;
+
+  totpRefreshing = true;
+  try {
+    const totp = await invoke("get_totp", { id });
+    if (state.selectedId !== id || !state.selected?.hasTotp) return;
+
+    detailTotpEl.value = formatTotpCode(totp.code);
+    const remaining = Math.max(0, Number(totp.secondsRemaining) || 0);
+    const period = Math.max(1, Number(totp.period) || 30);
+    totpCountdownEl.textContent = `${remaining}s`;
+    const percent = Math.max(0, Math.min(100, (remaining / period) * 100));
+    totpProgressBarEl.style.width = `${percent}%`;
+    totpProgressBarEl.classList.toggle("expiring", remaining <= 5);
+  } catch (error) {
+    detailTotpEl.value = "";
+    totpCountdownEl.textContent = "indisponível";
+    totpProgressBarEl.style.width = "0%";
+    stopTotpTimer();
+    showToast(errorMessage(error), "error");
+  } finally {
+    totpRefreshing = false;
+  }
+}
+
+function startTotpTimer() {
+  stopTotpTimer();
+  if (!state.selected?.hasTotp) return;
+  refreshTotp();
+  totpTimer = setInterval(refreshTotp, 1000);
+}
+
+async function copyTotp() {
+  const code = detailTotpEl.value.replace(/\s/g, "");
+  await copyToClipboard(code, "Código 2FA copiado.");
 }
 
 async function togglePasswordReveal() {
@@ -563,6 +709,136 @@ async function refreshEntries() {
   }
 }
 
+function triggerImport() {
+  if (!state.unlocked) return;
+  importFileEl.value = "";
+  importFileEl.click();
+}
+
+function isImageFile(file) {
+  return file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name);
+}
+
+async function loadImageSource(file) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      const bitmap = await createImageBitmap(file);
+      return {
+        source: bitmap,
+        width: bitmap.width,
+        height: bitmap.height,
+        cleanup: () => bitmap.close?.(),
+      };
+    } catch {
+      // Tenta o caminho alternativo abaixo.
+    }
+  }
+
+  const url = URL.createObjectURL(file);
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error(`Não foi possível abrir ${file.name}.`));
+      element.src = url;
+    });
+    return {
+      source: image,
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+      cleanup: () => URL.revokeObjectURL(url),
+    };
+  } catch (error) {
+    URL.revokeObjectURL(url);
+    throw error;
+  }
+}
+
+async function decodeQrFromFile(file) {
+  const image = await loadImageSource(file);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error(`Não foi possível ler ${file.name}.`);
+
+    context.drawImage(image.source, 0, 0);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+    const result = jsQR(pixels.data, pixels.width, pixels.height, {
+      inversionAttempts: "attemptBoth",
+    });
+    if (!result?.data) {
+      throw new Error(`Nenhum QR code encontrado em ${file.name}.`);
+    }
+    return result.data;
+  } finally {
+    image.cleanup();
+  }
+}
+
+function showImportResult(result) {
+  const { imported, skipped, errors, warnings } = result;
+
+  if (imported === 0) {
+    const detail = errors[0] || warnings[0] || "Nenhum dado de senha ou 2FA encontrado.";
+    showToast(`Nenhuma entrada importada. ${detail}`, "error");
+    return;
+  }
+
+  let message = `${imported} ${imported === 1 ? "entrada importada" : "entradas importadas"}`;
+  if (skipped > 0) message += `; ${skipped} ignorada(s)`;
+  if (warnings.length > 0) message += `; ${warnings.length} aviso(s)`;
+  if (errors.length > 0) message += `; ${errors.length} erro(s)`;
+  showToast(`${message}.`, skipped > 0 || warnings.length > 0 || errors.length > 0 ? "info" : "success");
+}
+
+async function importFiles() {
+  const files = Array.from(importFileEl.files || []);
+  if (files.length === 0) return;
+
+  const originalLabel = importBtn.textContent;
+  importBtn.disabled = true;
+  importBtn.textContent = "Importando...";
+
+  try {
+    let imported = 0;
+    let skipped = 0;
+    const errors = [];
+    const warnings = [];
+
+    for (const file of files) {
+      if (file.size > 10 * 1024 * 1024) {
+        warnings.push(`${file.name}: arquivo grande demais (limite de 10 MB).`);
+        continue;
+      }
+
+      let data;
+      try {
+        data = isImageFile(file) ? await decodeQrFromFile(file) : await file.text();
+      } catch (error) {
+        errors.push(errorMessage(error));
+        continue;
+      }
+
+      const result = await invoke("import_vault_data", { data });
+      imported += result.imported;
+      skipped += result.skipped;
+      errors.push(...(result.errors || []));
+      warnings.push(...(result.warnings || []));
+    }
+
+    await refreshEntries();
+    showImportResult({ imported, skipped, errors, warnings });
+  } catch (error) {
+    showToast(errorMessage(error), "error");
+  } finally {
+    importBtn.disabled = false;
+    importBtn.textContent = originalLabel;
+    importFileEl.value = "";
+  }
+}
+
 function resetEntryForm() {
   entryForm.reset();
   entryIdEl.value = "";
@@ -577,10 +853,11 @@ async function openEntryModal(entry = null) {
 
   if (entry) {
     try {
-      const [details, username, password, notes] = await Promise.all([
+      const [details, username, password, totp, notes] = await Promise.all([
         invoke("get_entry", { id: entry.id }),
         invoke("get_secret", { id: entry.id, field: "USER" }),
         invoke("get_secret", { id: entry.id, field: "PASS" }),
+        invoke("get_secret", { id: entry.id, field: "TOTP" }),
         invoke("get_secret", { id: entry.id, field: "NOTE" }),
       ]);
 
@@ -588,6 +865,7 @@ async function openEntryModal(entry = null) {
       entryServiceEl.value = details.name;
       entryUsernameEl.value = username || "";
       entryPasswordEl.value = password || "";
+      entryTotpEl.value = totp || "";
       entryNotesEl.value = notes || "";
       entryModalTitle.textContent = "Editar senha";
     } catch (error) {
@@ -610,14 +888,15 @@ async function saveEntry(event) {
   const service = entryServiceEl.value.trim();
   const username = entryUsernameEl.value;
   const password = entryPasswordEl.value;
+  const totp = entryTotpEl.value.trim();
   const notes = entryNotesEl.value;
 
   if (!service) {
     showEntryError("Informe o serviço ou site.");
     return;
   }
-  if (!password) {
-    showEntryError("Informe a senha.");
+  if (!password && !totp) {
+    showEntryError("Informe a senha ou o código 2FA.");
     return;
   }
 
@@ -633,6 +912,7 @@ async function saveEntry(event) {
         service,
         username,
         password,
+        totp,
         notes,
       });
       showToast("Entrada atualizada.", "success");
@@ -641,6 +921,7 @@ async function saveEntry(event) {
         service,
         username,
         password,
+        totp,
         notes,
       });
       state.selectedId = targetId;
@@ -755,6 +1036,7 @@ async function generatePassword() {
 function bindEvents() {
   document.getElementById("btn-choose").addEventListener("click", chooseFolder);
   document.getElementById("btn-portable").addEventListener("click", usePortableFolder);
+  document.getElementById("btn-refresh-storage").addEventListener("click", loadStorageOptions);
   unlockBtn.addEventListener("click", openVault);
   createBtn.addEventListener("click", createVault);
   document.getElementById("btn-lock").addEventListener("click", () => lockVault(false));
@@ -779,6 +1061,8 @@ function bindEvents() {
   });
 
   document.getElementById("btn-new-entry").addEventListener("click", () => openEntryModal());
+  importBtn.addEventListener("click", triggerImport);
+  importFileEl.addEventListener("change", importFiles);
   document.getElementById("btn-edit").addEventListener("click", () => {
     const entry = state.entries.find((item) => item.id === state.selectedId);
     if (entry) openEntryModal(entry);
@@ -787,12 +1071,14 @@ function bindEvents() {
   revealBtn.addEventListener("click", togglePasswordReveal);
   copyUserBtn.addEventListener("click", copyUsername);
   copyPassBtn.addEventListener("click", copyPassword);
+  copyTotpBtn.addEventListener("click", copyTotp);
 
   entryForm.addEventListener("submit", saveEntry);
   document.getElementById("btn-cancel-entry").addEventListener("click", () => entryModal.close());
   document.getElementById("btn-close-entry").addEventListener("click", () => entryModal.close());
   entryModal.addEventListener("close", () => {
     entryPasswordEl.value = "";
+    entryTotpEl.value = "";
     hideEntryError();
   });
 
@@ -848,9 +1134,10 @@ async function init() {
     state.mobile = false;
   }
   applyMobileUi();
+  await loadStorageOptions();
   refreshLockButtons();
 
-  const lastFolder = state.mobile ? null : localStorage.getItem(LAST_FOLDER_KEY);
+  const lastFolder = localStorage.getItem(LAST_FOLDER_KEY);
   if (lastFolder) {
     await setFolder(lastFolder);
   } else if (state.mobile) {
